@@ -179,6 +179,23 @@ def max_drawdown(equity: pd.Series) -> float:
     return dd.min()
 
 
+def time_to_recovery_days(equity: pd.Series) -> int | None:
+    """Nombre de jours de trading entre le pic d'avant max DD et le retour
+    au pic. Renvoie None si pas encore récupéré au dernier point."""
+    peak = equity.cummax()
+    dd = equity / peak - 1.0
+    if dd.min() >= 0:
+        return 0
+    trough_idx = dd.idxmin()
+    peak_idx = equity.loc[:trough_idx].idxmax()
+    peak_val = equity.loc[peak_idx]
+    after = equity.loc[trough_idx:]
+    recovered = after[after >= peak_val]
+    if recovered.empty:
+        return None
+    return int(equity.index.get_loc(recovered.index[0]) - equity.index.get_loc(peak_idx))
+
+
 def perf_metrics(net_ret: pd.Series, equity: pd.Series,
                  turnover: pd.Series | None = None,
                  first_active: pd.Timestamp | None = None,
@@ -216,12 +233,16 @@ def perf_metrics(net_ret: pd.Series, equity: pd.Series,
     sortino = (excess.mean() * ANN) / (downside.std() * np.sqrt(ANN)) if len(downside) > 1 else np.nan
     mdd = max_drawdown(equity)
     win = (net_ret > 0).mean()
+    calmar = (cagr / abs(mdd)) if mdd < 0 and not np.isnan(cagr) else np.nan
+    ttr = time_to_recovery_days(equity)
     out = {
         "CAGR_%":     cagr * 100,
         "Vol_%":      vol * 100,
         "Sharpe":     sharpe,
         "Sortino":    sortino,
+        "Calmar":     calmar,
         "MaxDD_%":    mdd * 100,
+        "TTR_days":   ttr,
         "WinRate_%":  win * 100,
     }
     if turnover is not None:

@@ -390,6 +390,67 @@ def probabilistic_sharpe(returns: pd.Series, sr_benchmark_ann: float = 0.0) -> d
     }
 
 
+def jobson_korkie_test(ret_a: pd.Series, ret_b: pd.Series) -> dict:
+    """Test de Jobson-Korkie (1981) corrigé par Memmel (2003) pour comparer
+    deux Sharpe ratios sur le même échantillon.
+
+    H0 : SR_a = SR_b. Statistique z asymptotiquement normale. Retourne le
+    z-stat et le p-value bilatéral."""
+    common = ret_a.dropna().index.intersection(ret_b.dropna().index)
+    if len(common) < 30:
+        return {"error": "trop peu d'observations communes"}
+    a = ret_a.loc[common].values
+    b = ret_b.loc[common].values
+
+    mu_a, sd_a = a.mean(), a.std(ddof=1)
+    mu_b, sd_b = b.mean(), b.std(ddof=1)
+    if sd_a <= 0 or sd_b <= 0:
+        return {"error": "variance nulle"}
+
+    sr_a_daily = mu_a / sd_a
+    sr_b_daily = mu_b / sd_b
+    sr_a_ann = sr_a_daily * np.sqrt(ANN)
+    sr_b_ann = sr_b_daily * np.sqrt(ANN)
+
+    rho = np.corrcoef(a, b)[0, 1]
+    n = len(a)
+    theta = 2 * (1 - rho) + 0.5 * (sr_a_daily ** 2 + sr_b_daily ** 2 - 2 * sr_a_daily * sr_b_daily * rho ** 2)
+    if theta <= 0:
+        return {"error": "theta non positif"}
+    z = (sr_a_daily - sr_b_daily) * np.sqrt(n / theta)
+    p_two_sided = 2 * (1 - norm.cdf(abs(z)))
+
+    return {
+        "SR_a_ann":     float(sr_a_ann),
+        "SR_b_ann":     float(sr_b_ann),
+        "SR_diff_ann":  float(sr_a_ann - sr_b_ann),
+        "rho":          float(rho),
+        "z_stat":       float(z),
+        "p_value":      float(p_two_sided),
+        "n_obs":        int(n),
+    }
+
+
+def adf_test(series: pd.Series, max_lag: int | None = None) -> dict:
+    """Augmented Dickey-Fuller test for stationarity.
+
+    H0 : la série a une racine unitaire (non stationnaire).
+    Si p < 0.05 → on rejette H0 → la série est probablement stationnaire."""
+    from statsmodels.tsa.stattools import adfuller
+    s = series.dropna()
+    if len(s) < 20:
+        return {"error": "trop peu d'observations"}
+    result = adfuller(s.values, maxlag=max_lag, autolag="AIC")
+    return {
+        "adf_stat":       float(result[0]),
+        "p_value":        float(result[1]),
+        "used_lag":       int(result[2]),
+        "n_obs":          int(result[3]),
+        "crit_5%":        float(result[4]["5%"]),
+        "is_stationary":  bool(result[1] < 0.05),
+    }
+
+
 def newey_west_alpha(strat_ret: pd.Series, bench_ret: pd.Series,
                      maxlags: int = 21) -> dict:
     """t-stat HAC (Newey-West) de l'excess return moyen sur benchmark.
