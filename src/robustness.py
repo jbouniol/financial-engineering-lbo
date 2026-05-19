@@ -128,6 +128,156 @@ def rolling_beta(strat_ret: pd.Series, factor_ret: pd.Series,
     return (cov / var).rename("beta")
 
 
+def tracking_metrics(strat_ret: pd.Series, bench_ret: pd.Series) -> dict:
+    """IR, tracking error, beta, alpha vs un benchmark unique.
+
+    - IR  = excess_return_ann / tracking_error
+    - TE  = std(strat - bench) × √252
+    - Beta et alpha via OLS naïf (sans HAC ici — pour la version HAC, voir
+      `newey_west_alpha` et `capm_regression`)."""
+    common = strat_ret.dropna().index.intersection(bench_ret.dropna().index)
+    if len(common) < 30:
+        return {"error": "trop peu d'observations communes"}
+    s = strat_ret.loc[common]
+    b = bench_ret.loc[common]
+    excess = s - b
+    te = excess.std() * np.sqrt(ANN)
+    mean_excess = excess.mean() * ANN
+    ir = mean_excess / te if te > 0 else np.nan
+
+    cov = np.cov(s.values, b.values, ddof=1)
+    beta = cov[0, 1] / cov[1, 1] if cov[1, 1] > 0 else np.nan
+    alpha_ann = (s.mean() - beta * b.mean()) * ANN if pd.notna(beta) else np.nan
+    return {
+        "beta":                float(beta),
+        "alpha_ann_%":         float(alpha_ann * 100),
+        "tracking_error_%":    float(te * 100),
+        "information_ratio":   float(ir),
+        "excess_return_ann_%": float(mean_excess * 100),
+        "n_obs":               int(len(common)),
+    }
+
+
+# -----------------------------
+# 2D sensitivity (V4)
+# -----------------------------
+
+def sensitivity_high_lookback(yields: pd.DataFrame, prices: pd.DataFrame,
+                              highs: list[float], lookbacks: list[int],
+                              threshold_low: float = 0.0,
+                              tc_bps: float = 2.0, slip_bps: float = 2.0) -> pd.DataFrame:
+    """V4 Sharpe sur grille 2D (threshold_high × lookback_months), threshold_low fixé.
+
+    Permet de visualiser dans un seul tableau la sensibilité aux deux
+    paramètres les plus importants de V4."""
+    result = pd.DataFrame(index=highs, columns=lookbacks, dtype=float)
+    for high in highs:
+        for lb in lookbacks:
+            w = signal_v4(yields, prices, trend_lookback_months=lb,
+                          threshold_low=threshold_low, threshold_high=high)
+            bt = run_backtest(prices, w, tc_bps=tc_bps, slip_bps=slip_bps)
+            m = perf_metrics(bt["net_ret"], bt["equity"], bt["turnover"], bt["first_active"])
+            result.loc[high, lb] = m.get("Sharpe", np.nan)
+    return result.astype(float)
+
+
+# -----------------------------
+# Walk-forward V4
+# -----------------------------
+
+def walk_forward_v4(yields: pd.DataFrame, prices: pd.DataFrame,
+                    train_years: int = 5, test_years: int = 3,
+                    threshold_low_grid: list[float] | None = None,
+                    threshold_high_grid: list[float] | None = None,
+                    lookback_grid: list[int] | None = None,
+                    tc_bps: float = 2.0, slip_bps: float = 2.0) -> dict:
+    """Walk-forward V4 : refit (low, high, lookback) sur chaque fenêtre train
+    glissante (`train_years`), évalue sur la fenêtre test suivante
+    (`test_years`), concatène les returns de test. Non-overlapping test windows.
+
+    Renvoie net_ret / equity sur la période OOS concaténée, plus le DataFrame
+    des paramètres choisis à chaque pas (utile pour repérer un overfit qui
+    sauterait d'un point optimal à l'autre)."""
+    if threshold_low_grid is None:
+        threshold_low_grid = [-0.5, -0.25, 0.0, 0.25]
+    if threshold_high_grid is None:
+        threshold_high_grid = [0.5, 0.75, 1.0, 1.25, 1.5]
+    if lookback_grid is None:
+        lookback_grid = [2, 3, 6, 9, 12]
+
+    start = prices.index[0]
+    end   = prices.index[-1]
+
+    windows = []
+    train_start = start
+    while True:
+        train_end = train_start + pd.DateOffset(years=train_years)
+        test_start = train_end
+        test_end = test_start + pd.DateOffset(years=test_years)
+        if test_start >= end:
+            break
+        if test_end > end:
+            test_end = end
+        windows.append((train_start, train_end, test_start, test_end))
+        train_start = train_start + pd.DateOffset(years=test_years)
+
+    if not windows:
+        return {"error": "historique trop court pour les paramètres train/test"}
+
+    test_ret_parts = []
+    param_choices  = []
+
+    for train_start, train_end, test_start, test_end in windows:
+        best = None
+        for low in threshold_low_grid:
+            for high in threshold_high_grid:
+                if high <= low:
+                    continue
+                for lb in lookback_grid:
+                    w = signal_v4(yields, prices, trend_lookback_months=lb,
+                                  threshold_low=low, threshold_high=high)
+                    bt = run_backtest(prices, w, tc_bps=tc_bps, slip_bps=slip_bps)
+                    r = bt["net_ret"].loc[train_start:train_end]
+                    if len(r) < 60 or r.std() <= 0:
+                        continue
+                    sh = (r.mean() / r.std()) * np.sqrt(ANN)
+                    if best is None or sh > best[3]:
+                        best = (low, high, lb, sh)
+
+        if best is None:
+            continue
+        low, high, lb, train_sh = best
+
+        w_best = signal_v4(yields, prices, trend_lookback_months=lb,
+                           threshold_low=low, threshold_high=high)
+        bt = run_backtest(prices, w_best, tc_bps=tc_bps, slip_bps=slip_bps)
+        test_ret = bt["net_ret"].loc[test_start:test_end]
+        test_ret_parts.append(test_ret)
+
+        param_choices.append({
+            "train":              f"{train_start.date()}→{train_end.date()}",
+            "test":               f"{test_start.date()}→{test_end.date()}",
+            "threshold_low":      low,
+            "threshold_high":     high,
+            "lookback_months":    lb,
+            "train_sharpe":       round(float(train_sh), 3),
+        })
+
+    if not test_ret_parts:
+        return {"error": "aucun test window n'a produit de returns"}
+
+    wf_ret = pd.concat(test_ret_parts).sort_index()
+    wf_ret = wf_ret[~wf_ret.index.duplicated(keep="first")]
+    wf_equity = (1 + wf_ret).cumprod()
+
+    return {
+        "net_ret":   wf_ret,
+        "equity":    wf_equity,
+        "params":    pd.DataFrame(param_choices),
+        "windows":   windows,
+    }
+
+
 # -----------------------------
 # Sensitivity tests
 # -----------------------------
