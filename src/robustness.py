@@ -68,6 +68,26 @@ def perf_by_regime(net_ret: pd.Series, regime: pd.Series,
     return pd.DataFrame(rows).set_index("regime").round(2)
 
 
+def perf_by_period(net_ret: pd.Series,
+                   periods: dict[str, tuple[str, str]],
+                   turnover: pd.Series | None = None) -> pd.DataFrame:
+    """Métriques sur des sous-périodes nommées. `periods` est un dict
+    {label: (start, end)} avec dates parsables par pandas.
+
+    Pour chaque sous-période on recalcule l'equity comme `(1+ret).cumprod()`,
+    indépendamment des autres périodes."""
+    rows = []
+    for label, (start, end) in periods.items():
+        sl = net_ret.loc[start:end].dropna()
+        if len(sl) < 5:
+            continue
+        eq = (1 + sl).cumprod()
+        tn = turnover.loc[start:end] if turnover is not None else None
+        m = perf_metrics(sl, eq, turnover=tn)
+        rows.append({"period": label, **m})
+    return pd.DataFrame(rows).set_index("period")
+
+
 def yearly_returns(net_ret: pd.Series,
                    first_active: pd.Timestamp | None = None) -> pd.Series:
     """Returns annuels en %, composés depuis le 1er janvier de chaque année."""
