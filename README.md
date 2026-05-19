@@ -17,7 +17,6 @@ On allouait 100% du capital sur un seul ETF obligataire US à la fois (TLT long 
 ```
 .
 ├── README.md                              ← ce fichier
-├── CLAUDE.local.md                        ← brief projet (privé, gitignore)
 ├── requirements.txt                       ← dépendances Python
 ├── .gitignore
 ├── Docs/
