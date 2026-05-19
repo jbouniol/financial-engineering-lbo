@@ -4,11 +4,15 @@ Signals : V1 (régime sur niveau du spread 2s10s),
           V4 (V1 + filtre trend 3 mois pour bypass duration en marché baissier).
 
 Engine  : vectorisé, rebalancing mensuel, weights laggés d'un jour pour
-          exclure le look-ahead bias. Transaction costs et slippage sont
-          appliqués au turnover one-way.
+          exclure le look-ahead bias.
 
-Metrics : equity curve, CAGR, Sharpe, Sortino, max DD, vol, win rate,
-          turnover annualisé, vs buy & hold.
+Garanties anti-look-ahead :
+- Les yields FRED sont shiftés d'un jour ouvré avant la construction du signal
+  (DGS2/DGS10 du jour t ne sont publiés qu'en t+1).
+- Le rebalancing se fait au dernier jour de TRADING ETF du mois (pas le dernier
+  jour calendaire — robuste aux weekends et US holidays).
+- L'exécution est décalée en jours de trading réels (pas BusinessDay civil) via
+  le calendrier `prices.index`.
 """
 
 from __future__ import annotations
@@ -21,17 +25,37 @@ ANN = 252
 
 
 # -----------------------------
+# Calendar helpers
+# -----------------------------
+
+def _month_end_trading_days(daily_index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    """Dernier jour de trading de chaque mois dans `daily_index`."""
+    s = pd.Series(daily_index, index=daily_index)
+    last = s.groupby(daily_index.to_period("M")).last()
+    return pd.DatetimeIndex(last.values)
+
+
+def _spread_at_rebal(yields: pd.DataFrame, prices: pd.DataFrame) -> pd.Series:
+    """Spread 2s10s mesuré au dernier jour de trading du mois, en utilisant la
+    valeur publiée au jour précédent (shift de 1 pour absorber le délai FRED)."""
+    spread = (yields["DGS10"] - yields["DGS2"]).shift(1)
+    spread_on_etf = spread.reindex(prices.index).ffill()
+    return spread_on_etf.loc[_month_end_trading_days(prices.index)].dropna()
+
+
+# -----------------------------
 # Signals
 # -----------------------------
 
-def signal_v1(yields: pd.DataFrame, rebal: str = "ME") -> pd.DataFrame:
-    """Bucket sur le niveau du spread 2s10s, échantillonné en fin de mois.
+def signal_v1(yields: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
+    """Bucket sur le niveau du spread 2s10s, échantillonné au dernier jour de
+    trading du mois (calendrier ETF).
 
     spread > 1.0   → TLT (long duration)
     0 < spread ≤ 1 → IEF (intermediate)
     spread ≤ 0     → SHY (short duration, refuge)
     """
-    spread = (yields["DGS10"] - yields["DGS2"]).resample(rebal).last().dropna()
+    spread = _spread_at_rebal(yields, prices)
     w = pd.DataFrame(0.0, index=spread.index, columns=UNIVERSE)
     w.loc[spread > 1.0, "TLT"] = 1.0
     w.loc[(spread > 0) & (spread <= 1.0), "IEF"] = 1.0
@@ -39,26 +63,27 @@ def signal_v1(yields: pd.DataFrame, rebal: str = "ME") -> pd.DataFrame:
     return w
 
 
-def signal_v4(yields: pd.DataFrame, prices: pd.DataFrame, rebal: str = "ME",
+def signal_v4(yields: pd.DataFrame, prices: pd.DataFrame,
               trend_lookback_months: int = 3) -> pd.DataFrame:
     """V1 + filtre trend : si l'ETF sélectionné a un return négatif sur
-    `trend_lookback_months`, on bascule sur SHY (cash-like).
+    `trend_lookback_months`, on bascule sur SHY."""
+    base = signal_v1(yields, prices)
+    if base.empty:
+        return base
 
-    Confirmation prix au-dessus du seul signal macro pour éviter de tenir
-    une duration en plein trend baissier (ex. 2022)."""
-    base = signal_v1(yields, rebal=rebal)
-    monthly_px = prices.resample(rebal).last().reindex(base.index).ffill()
+    has_signal = base.sum(axis=1) > 0
+    monthly_px = prices.reindex(base.index).ffill()
     trend = monthly_px.pct_change(trend_lookback_months)
 
-    selected = base.idxmax(axis=1)
+    selected = base.where(has_signal).idxmax(axis=1)
     sel_trend = pd.Series(
-        [trend.loc[d, etf] if pd.notna(trend.loc[d, etf]) else 0.0
+        [trend.loc[d, etf] if pd.notna(etf) and pd.notna(trend.loc[d, etf]) else 0.0
          for d, etf in selected.items()],
         index=base.index,
     )
 
     out = base.copy()
-    bad = sel_trend < 0
+    bad = (sel_trend < 0) & has_signal
     out.loc[bad] = 0.0
     out.loc[bad, "SHY"] = 1.0
     return out
@@ -70,12 +95,29 @@ def signal_v4(yields: pd.DataFrame, prices: pd.DataFrame, rebal: str = "ME",
 
 def monthly_to_daily_weights(monthly_w: pd.DataFrame, daily_index: pd.DatetimeIndex,
                              execution_lag: int = 1) -> pd.DataFrame:
-    """Décale les poids mensuels d'un jour ouvré (signal à t → exécution close t+1)
-    puis reindex sur le calendrier daily avec forward-fill."""
-    effective = monthly_w.copy()
-    effective.index = effective.index + pd.tseries.offsets.BusinessDay(execution_lag)
-    daily = effective.reindex(daily_index, method="ffill")
-    return daily.fillna(0.0)
+    """Décale les poids mensuels de `execution_lag` jours de **trading**
+    (calendrier daily_index, pas BusinessDay civil) puis forward-fill.
+
+    Signal posé à la clôture t → poids effectifs à la clôture t + lag jours
+    de trading. Garantit qu'on n'utilise jamais d'info publiée après t.
+    """
+    cols = list(monthly_w.columns)
+    if len(monthly_w) == 0:
+        return pd.DataFrame(0.0, index=daily_index, columns=cols)
+
+    pos = daily_index.get_indexer(monthly_w.index, method="pad")
+    eff_pos = pos + execution_lag
+
+    mask = (pos >= 0) & (eff_pos < len(daily_index))
+    if not mask.any():
+        return pd.DataFrame(0.0, index=daily_index, columns=cols)
+
+    effective = monthly_w.loc[mask].copy()
+    effective.index = daily_index[eff_pos[mask]]
+    effective = effective[~effective.index.duplicated(keep="last")]
+
+    daily = effective.reindex(daily_index, method="ffill").fillna(0.0)
+    return daily
 
 
 def run_backtest(prices: pd.DataFrame, weights_monthly: pd.DataFrame,
@@ -85,8 +127,8 @@ def run_backtest(prices: pd.DataFrame, weights_monthly: pd.DataFrame,
 
     tc_bps         : coût de transaction (one-way, en bps de notional traded).
     slip_bps       : slippage (one-way, en bps).
-    execution_lag  : décalage signal → exécution, en jours ouvrés. 1 = T+1
-                     (backtest standard), 2 = T+2 (mode paper plus prudent).
+    execution_lag  : décalage signal → exécution, en jours de **trading** ETF.
+                     1 = T+1 (backtest standard), 2 = T+2 (mode paper prudent).
 
     Returns un dict avec equity, returns, weights, turnover, costs.
     """
@@ -101,7 +143,15 @@ def run_backtest(prices: pd.DataFrame, weights_monthly: pd.DataFrame,
     cost = turnover * cost_rate
 
     net_ret = gross_ret - cost
-    equity = (1.0 + net_ret).cumprod()
+
+    # CAGR robuste : on ne compte que la période effective où on est investi.
+    active_mask = w.sum(axis=1) > 0
+    if active_mask.any():
+        start = active_mask.idxmax()
+        eq = pd.Series(1.0, index=prices.index)
+        eq.loc[start:] = (1.0 + net_ret.loc[start:]).cumprod()
+    else:
+        eq = pd.Series(1.0, index=prices.index)
 
     return {
         "weights": w,
@@ -109,7 +159,8 @@ def run_backtest(prices: pd.DataFrame, weights_monthly: pd.DataFrame,
         "net_ret": net_ret,
         "turnover": turnover,
         "cost": cost,
-        "equity": equity,
+        "equity": eq,
+        "first_active": active_mask.idxmax() if active_mask.any() else None,
     }
 
 
@@ -125,7 +176,17 @@ def max_drawdown(equity: pd.Series) -> float:
 
 def perf_metrics(net_ret: pd.Series, equity: pd.Series,
                  turnover: pd.Series | None = None,
+                 first_active: pd.Timestamp | None = None,
                  rf: float = 0.0) -> dict:
+    """Métriques calculées sur la période effective (à partir de `first_active`
+    si fourni). rf est annualisé (taux sans risque). Pour rendre rf comparable,
+    on retire rf annualisé du return annualisé du portefeuille."""
+    if first_active is not None:
+        net_ret = net_ret.loc[first_active:]
+        equity = equity.loc[first_active:]
+        if turnover is not None:
+            turnover = turnover.loc[first_active:]
+
     n = len(net_ret)
     if n == 0:
         return {}
@@ -152,30 +213,24 @@ def perf_metrics(net_ret: pd.Series, equity: pd.Series,
 
 def trade_log(prices: pd.DataFrame, weights_monthly: pd.DataFrame,
               execution_lag: int = 1) -> pd.DataFrame:
-    """Liste les rotations effectives (changement d'ETF retenu d'un mois sur l'autre)
-    avec leur prix théorique (close du jour du signal) et prix exécuté
-    (close du jour d'exécution). Sert à mesurer le slippage implicite lié au lag."""
+    """Liste les rotations effectives avec leur prix théorique (close du jour
+    du signal) et prix exécuté (close après `execution_lag` jours de trading).
+    `slip_bps` mesure le drift de marché entre les deux (≠ slippage modélisé)."""
     sel = weights_monthly.idxmax(axis=1)
     rotations_mask = sel != sel.shift(1)
     rotations_mask.iloc[0] = True
     rotations = sel[rotations_mask]
 
-    bd = pd.tseries.offsets.BusinessDay(execution_lag)
     rows = []
     for sig_date, etf in rotations.items():
-        exec_date = (sig_date + bd)
-        if exec_date not in prices.index:
-            future_idx = prices.index[prices.index >= exec_date]
-            if len(future_idx) == 0:
-                continue
-            exec_date = future_idx[0]
-        if sig_date not in prices.index:
-            past_idx = prices.index[prices.index <= sig_date]
-            if len(past_idx) == 0:
-                continue
-            sig_date_eff = past_idx[-1]
-        else:
-            sig_date_eff = sig_date
+        pos = prices.index.get_indexer([sig_date], method="pad")[0]
+        if pos < 0:
+            continue
+        exec_pos = pos + execution_lag
+        if exec_pos >= len(prices.index):
+            continue
+        sig_date_eff = prices.index[pos]
+        exec_date = prices.index[exec_pos]
         sig_px = prices.loc[sig_date_eff, etf]
         exec_px = prices.loc[exec_date, etf]
         rows.append({

@@ -74,16 +74,16 @@ Backtest 2003 à 2026 avec frais inclus, comparé à un buy and hold IEF :
 
 | Version | CAGR | Vol | Sharpe | Max DD | Turnover/an |
 |---|---:|---:|---:|---:|---:|
-| V1 sans coûts | 5.08% | 11.0% | 0.51 | -26.6% | 0.92 |
-| V2 + transaction costs | 5.06% | 11.0% | 0.50 | -26.6% | 0.92 |
-| V3 + slippage | 5.04% | 11.0% | 0.50 | -26.6% | 0.92 |
-| V4 + filtre trend | 4.16% | 8.8% | 0.51 | -21.2% | 2.94 |
-| Buy & Hold IEF | 3.37% | 6.8% | 0.52 | -23.9% | — |
+| V1 sans coûts | 5.07% | 11.0% | 0.50 | -26.6% | 0.92 |
+| V2 + transaction costs | 5.05% | 11.0% | 0.50 | -26.6% | 0.92 |
+| V3 + slippage | 5.03% | 11.0% | 0.50 | -26.6% | 0.92 |
+| V4 + filtre trend | 4.08% | 8.9% | 0.50 | -21.2% | 3.07 |
+| Buy & Hold IEF | 3.38% | 6.8% | 0.52 | -23.9% | — |
 
 Paper trading 2024-2026 avec V4 et exécution plus réaliste (lag T+2, slippage 5 bps) :
 
 | Période | CAGR | Vol | Sharpe | Max DD |
 |---|---:|---:|---:|---:|
-| In-sample 2003-2023 | 4.47% | 9.2% | 0.52 | -21.2% |
-| OOS backtest 2024-2026 | 1.30% | 3.8% | 0.36 | -3.9% |
-| OOS paper 2024-2026 | 0.99% | 3.9% | 0.27 | -4.7% |
+| In-sample 2003-2023 | 4.39% | 9.3% | 0.51 | -21.2% |
+| OOS backtest 2024-2026 | 1.35% | 3.9% | 0.36 | -3.9% |
+| OOS paper 2024-2026 | 1.14% | 3.9% | 0.31 | -4.7% |
