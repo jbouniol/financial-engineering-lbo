@@ -79,17 +79,20 @@ def monthly_to_daily_weights(monthly_w: pd.DataFrame, daily_index: pd.DatetimeIn
 
 
 def run_backtest(prices: pd.DataFrame, weights_monthly: pd.DataFrame,
-                 tc_bps: float = 0.0, slip_bps: float = 0.0) -> dict:
+                 tc_bps: float = 0.0, slip_bps: float = 0.0,
+                 execution_lag: int = 1) -> dict:
     """Backtest vectorisé.
 
-    tc_bps   : coût de transaction (one-way, en bps de notional traded).
-    slip_bps : slippage (one-way, en bps).
+    tc_bps         : coût de transaction (one-way, en bps de notional traded).
+    slip_bps       : slippage (one-way, en bps).
+    execution_lag  : décalage signal → exécution, en jours ouvrés. 1 = T+1
+                     (backtest standard), 2 = T+2 (mode paper plus prudent).
 
     Returns un dict avec equity, returns, weights, turnover, costs.
     """
     prices = prices[UNIVERSE].copy()
     rets = prices.pct_change().fillna(0.0)
-    w = monthly_to_daily_weights(weights_monthly, prices.index)
+    w = monthly_to_daily_weights(weights_monthly, prices.index, execution_lag=execution_lag)
 
     gross_ret = (w * rets).sum(axis=1)
 
@@ -145,6 +148,45 @@ def perf_metrics(net_ret: pd.Series, equity: pd.Series,
     if turnover is not None:
         out["Turnover_ann"] = turnover.sum() / (n / ANN)
     return out
+
+
+def trade_log(prices: pd.DataFrame, weights_monthly: pd.DataFrame,
+              execution_lag: int = 1) -> pd.DataFrame:
+    """Liste les rotations effectives (changement d'ETF retenu d'un mois sur l'autre)
+    avec leur prix théorique (close du jour du signal) et prix exécuté
+    (close du jour d'exécution). Sert à mesurer le slippage implicite lié au lag."""
+    sel = weights_monthly.idxmax(axis=1)
+    rotations_mask = sel != sel.shift(1)
+    rotations_mask.iloc[0] = True
+    rotations = sel[rotations_mask]
+
+    bd = pd.tseries.offsets.BusinessDay(execution_lag)
+    rows = []
+    for sig_date, etf in rotations.items():
+        exec_date = (sig_date + bd)
+        if exec_date not in prices.index:
+            future_idx = prices.index[prices.index >= exec_date]
+            if len(future_idx) == 0:
+                continue
+            exec_date = future_idx[0]
+        if sig_date not in prices.index:
+            past_idx = prices.index[prices.index <= sig_date]
+            if len(past_idx) == 0:
+                continue
+            sig_date_eff = past_idx[-1]
+        else:
+            sig_date_eff = sig_date
+        sig_px = prices.loc[sig_date_eff, etf]
+        exec_px = prices.loc[exec_date, etf]
+        rows.append({
+            "signal_date": sig_date_eff.date(),
+            "exec_date":   exec_date.date(),
+            "etf":         etf,
+            "signal_px":   sig_px,
+            "exec_px":     exec_px,
+            "slip_bps":    (exec_px / sig_px - 1) * 10000,
+        })
+    return pd.DataFrame(rows)
 
 
 def buy_and_hold(prices: pd.DataFrame, weights: dict[str, float]) -> dict:
