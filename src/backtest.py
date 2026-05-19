@@ -182,10 +182,15 @@ def max_drawdown(equity: pd.Series) -> float:
 def perf_metrics(net_ret: pd.Series, equity: pd.Series,
                  turnover: pd.Series | None = None,
                  first_active: pd.Timestamp | None = None,
-                 rf: float = 0.0) -> dict:
+                 rf_daily: pd.Series | float = 0.0) -> dict:
     """Métriques calculées sur la période effective (à partir de `first_active`
-    si fourni). rf est annualisé (taux sans risque). Pour rendre rf comparable,
-    on retire rf annualisé du return annualisé du portefeuille."""
+    si fourni).
+
+    `rf_daily` :
+    - float    → taux daily constant (e.g. 0 pour Sharpe brut).
+    - pd.Series → taux daily aligné sur `net_ret` (e.g. issu de DGS3MO).
+      Le Sharpe et le Sortino sont calculés sur les excess returns
+      (`net_ret - rf_daily`) puis annualisés ×√252."""
     if first_active is not None:
         net_ret = net_ret.loc[first_active:]
         equity = equity.loc[first_active:]
@@ -195,12 +200,20 @@ def perf_metrics(net_ret: pd.Series, equity: pd.Series,
     n = len(net_ret)
     if n == 0:
         return {}
+
+    if isinstance(rf_daily, pd.Series):
+        rf_aligned = rf_daily.reindex(net_ret.index).ffill().fillna(0.0)
+    else:
+        rf_aligned = pd.Series(rf_daily, index=net_ret.index)
+
+    excess = net_ret - rf_aligned
+
     years = n / ANN
     cagr = equity.iloc[-1] ** (1 / years) - 1 if years > 0 else np.nan
     vol = net_ret.std() * np.sqrt(ANN)
-    sharpe = (net_ret.mean() * ANN - rf) / vol if vol > 0 else np.nan
-    downside = net_ret[net_ret < 0]
-    sortino = (net_ret.mean() * ANN - rf) / (downside.std() * np.sqrt(ANN)) if len(downside) > 1 else np.nan
+    sharpe = (excess.mean() * ANN) / vol if vol > 0 else np.nan
+    downside = excess[excess < 0]
+    sortino = (excess.mean() * ANN) / (downside.std() * np.sqrt(ANN)) if len(downside) > 1 else np.nan
     mdd = max_drawdown(equity)
     win = (net_ret > 0).mean()
     out = {

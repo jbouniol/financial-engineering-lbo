@@ -22,6 +22,113 @@ from .backtest import (
 
 
 # -----------------------------
+# Performance decomposition
+# -----------------------------
+
+def contribution_by_etf(weights: pd.DataFrame, etf_returns: pd.DataFrame,
+                        first_active: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Contribution cumulée au PnL par ETF.
+
+    Pour chaque ETF i : Σ_t w_{i,t} * r_{i,t}. Renvoie la contribution totale
+    et le poids moyen en % du temps tenu."""
+    if first_active is not None:
+        weights = weights.loc[first_active:]
+        etf_returns = etf_returns.loc[first_active:]
+
+    contrib = (weights * etf_returns).sum(axis=0)
+    time_held = (weights > 0).mean(axis=0) * 100
+    return pd.DataFrame({
+        "Contribution cumulée (%)": contrib * 100,
+        "% du temps tenu":         time_held,
+    }).round(2)
+
+
+def perf_by_regime(net_ret: pd.Series, regime: pd.Series,
+                   first_active: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Returns annualisé, vol, Sharpe par état du `regime` (Series alignée)."""
+    if first_active is not None:
+        net_ret = net_ret.loc[first_active:]
+        regime = regime.loc[first_active:]
+
+    rows = []
+    for label, sub in net_ret.groupby(regime):
+        if len(sub) < 2:
+            continue
+        mean_ann = sub.mean() * ANN * 100
+        vol_ann  = sub.std() * np.sqrt(ANN) * 100
+        sharpe   = (sub.mean() / sub.std()) * np.sqrt(ANN) if sub.std() > 0 else np.nan
+        rows.append({
+            "regime":       label,
+            "n_days":       len(sub),
+            "mean_ann_%":   mean_ann,
+            "vol_ann_%":    vol_ann,
+            "Sharpe":       sharpe,
+            "win_rate_%":   (sub > 0).mean() * 100,
+        })
+    return pd.DataFrame(rows).set_index("regime").round(2)
+
+
+def yearly_returns(net_ret: pd.Series,
+                   first_active: pd.Timestamp | None = None) -> pd.Series:
+    """Returns annuels en %, composés depuis le 1er janvier de chaque année."""
+    if first_active is not None:
+        net_ret = net_ret.loc[first_active:]
+    yr = net_ret.resample("YE").apply(lambda x: (1 + x).prod() - 1) * 100
+    yr.index = yr.index.year
+    return yr.round(2)
+
+
+# -----------------------------
+# CAPM-style factor regression
+# -----------------------------
+
+def capm_regression(strat_ret: pd.Series, factor_rets: pd.DataFrame,
+                    rf_daily: pd.Series | float = 0.0) -> dict:
+    """Régression OLS de l'excess return de la stratégie sur les excess returns
+    des facteurs (Newey-West HAC standard errors)."""
+    import statsmodels.api as sm
+
+    s = strat_ret.dropna()
+    f = factor_rets.dropna(how="all").reindex(s.index).dropna()
+    common = s.index.intersection(f.index)
+    s = s.loc[common]
+    f = f.loc[common]
+
+    if isinstance(rf_daily, pd.Series):
+        rf = rf_daily.reindex(common).ffill().fillna(0.0)
+    else:
+        rf = pd.Series(rf_daily, index=common)
+
+    y = (s - rf).values
+    X = sm.add_constant(f.subtract(rf, axis=0).values)
+    model = sm.OLS(y, X).fit(cov_type="HAC", cov_kwds={"maxlags": 21})
+
+    names = ["alpha"] + list(f.columns)
+    coefs = dict(zip(names, [float(c) for c in model.params]))
+    tstats = dict(zip(names, [float(t) for t in model.tvalues]))
+    pvals = dict(zip(names, [float(p) for p in model.pvalues]))
+    return {
+        "coefs":        coefs,
+        "tstats":       tstats,
+        "pvalues":      pvals,
+        "alpha_ann_%":  coefs["alpha"] * ANN * 100,
+        "r_squared":    float(model.rsquared),
+        "n_obs":        int(len(common)),
+    }
+
+
+def rolling_beta(strat_ret: pd.Series, factor_ret: pd.Series,
+                 window_days: int = 252) -> pd.Series:
+    """Beta roulant de strat_ret sur factor_ret, fenêtre `window_days`."""
+    common = strat_ret.dropna().index.intersection(factor_ret.dropna().index)
+    s = strat_ret.loc[common]
+    f = factor_ret.loc[common]
+    cov = s.rolling(window_days).cov(f)
+    var = f.rolling(window_days).var()
+    return (cov / var).rename("beta")
+
+
+# -----------------------------
 # Sensitivity tests
 # -----------------------------
 
