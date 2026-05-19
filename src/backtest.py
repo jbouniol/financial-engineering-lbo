@@ -47,27 +47,32 @@ def _spread_at_rebal(yields: pd.DataFrame, prices: pd.DataFrame) -> pd.Series:
 # Signals
 # -----------------------------
 
-def signal_v1(yields: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
+def signal_v1(yields: pd.DataFrame, prices: pd.DataFrame,
+              threshold_low: float = 0.0, threshold_high: float = 1.0) -> pd.DataFrame:
     """Bucket sur le niveau du spread 2s10s, échantillonné au dernier jour de
     trading du mois (calendrier ETF).
 
-    spread > 1.0   → TLT (long duration)
-    0 < spread ≤ 1 → IEF (intermediate)
-    spread ≤ 0     → SHY (short duration, refuge)
+    spread > threshold_high           → TLT (long duration)
+    threshold_low < spread ≤ high     → IEF (intermediate)
+    spread ≤ threshold_low            → SHY (short duration, refuge)
+
+    Valeurs par défaut (0 et 1%) choisies a priori sur base économique :
+    inversion = signal de récession ; prime de terme \"normale\" > 100 bps.
     """
     spread = _spread_at_rebal(yields, prices)
     w = pd.DataFrame(0.0, index=spread.index, columns=UNIVERSE)
-    w.loc[spread > 1.0, "TLT"] = 1.0
-    w.loc[(spread > 0) & (spread <= 1.0), "IEF"] = 1.0
-    w.loc[spread <= 0, "SHY"] = 1.0
+    w.loc[spread > threshold_high, "TLT"] = 1.0
+    w.loc[(spread > threshold_low) & (spread <= threshold_high), "IEF"] = 1.0
+    w.loc[spread <= threshold_low, "SHY"] = 1.0
     return w
 
 
 def signal_v4(yields: pd.DataFrame, prices: pd.DataFrame,
-              trend_lookback_months: int = 3) -> pd.DataFrame:
+              trend_lookback_months: int = 3,
+              threshold_low: float = 0.0, threshold_high: float = 1.0) -> pd.DataFrame:
     """V1 + filtre trend : si l'ETF sélectionné a un return négatif sur
     `trend_lookback_months`, on bascule sur SHY."""
-    base = signal_v1(yields, prices)
+    base = signal_v1(yields, prices, threshold_low=threshold_low, threshold_high=threshold_high)
     if base.empty:
         return base
 
