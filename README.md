@@ -43,12 +43,7 @@ data/raw/                       parquet data cache (auto-generated on first run)
   fred_dgs3mo.parquet
 notebooks/
   FINAL_notebook.ipynb          delivered notebook, 12 sections (top-to-bottom reproducible)
-  01_EDA.ipynb                  (à créer) — data exploration, ADF test on the spread
-  02_backtest_and_strategy.ipynb (à créer) — strategy + V1-V4 iterations, robustness, walk-forward
-  03_paper_trading_analysis.ipynb (à créer) — paper trading 2024-2026 vs BH IEF
 ```
-
-`FINAL_notebook.ipynb` is the primary deliverable — self-contained, no external modules. The three numbered notebooks are work-in-progress scratch notebooks used during development.
 
 ## Data sources
 
