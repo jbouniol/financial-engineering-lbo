@@ -25,27 +25,30 @@ python -m pip check
 
 Then select the venv as the Jupyter / VSCode kernel and open a notebook.
 
-On the first run the notebooks download the ETF prices from Yahoo Finance and the yields from FRED, then cache everything under `data/raw/`. Subsequent runs read the cache, so it works offline.
+**The data pipeline is fully autonomous — no manual download required.**
+
+On the first run, the notebook automatically fetches ETF prices from Yahoo Finance and yields from FRED (public CSV endpoint, no API key needed), then caches everything as Parquet files under `data/raw/`. Subsequent runs read from the cache and work fully offline. The cache files are committed to the repository, so cloning the repo is sufficient to run the notebook without any network access.
 
 ## Repository layout
 
 ```
 README.md
 requirements.txt
-src/
-  data.py          fetch yfinance + FRED, parquet cache
-  backtest.py      V1/V4 signals, engine, rf-aware metrics
-  robustness.py    sensitivity, bootstrap, PSR, Newey-West,
-                   Jobson-Korkie, ADF, walk-forward, CAPM
-data/raw/          parquet data cache
+Docs/
+  group_project_guidelines.md   full grading rubric and project brief
+data/raw/                       parquet data cache (auto-generated on first run)
+  etf_prices.parquet
+  benchmark_prices.parquet
+  fred_yields.parquet
+  fred_dgs3mo.parquet
 notebooks/
-  01_EDA.ipynb                      data exploration, ADF test on the spread
-  02_backtest_and_strategy.ipynb    strategy + V1-V4 iterations, robustness, walk-forward
-  03_paper_trading_analysis.ipynb   paper trading 2024-2026 vs BH IEF
-  FINAL_notebook.ipynb              delivered notebook, 12 sections
+  FINAL_notebook.ipynb          delivered notebook, 12 sections (top-to-bottom reproducible)
+  01_EDA.ipynb                  (à créer) — data exploration, ADF test on the spread
+  02_backtest_and_strategy.ipynb (à créer) — strategy + V1-V4 iterations, robustness, walk-forward
+  03_paper_trading_analysis.ipynb (à créer) — paper trading 2024-2026 vs BH IEF
 ```
 
-Logical reading order: 01, then 02, then 03, then FINAL. Shared code lives in `src/`; the notebooks import from it.
+`FINAL_notebook.ipynb` is the primary deliverable — self-contained, no external modules. The three numbered notebooks are work-in-progress scratch notebooks used during development.
 
 ## Data sources
 
