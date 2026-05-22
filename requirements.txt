@@ -1,11 +1,11 @@
-# Versions souples pour compatibilité large.
-# Versions exactes testées (mai 2026) en commentaire :
+# Soft version bounds for broad compatibility.
+# Exact versions tested (May 2026), shown here as a reference:
 #   numpy 2.4.6, pandas 3.0.3, matplotlib 3.10.9, seaborn 0.13.2,
 #   scipy 1.17.1, statsmodels 0.14.6, scikit-learn 1.8.0,
 #   yfinance 1.3.0, requests 2.34.2, pyarrow 24.0.0,
 #   jupyter 1.1.1, ipykernel 7.2.0.
-# Pour figer : pip freeze > requirements-frozen.txt
-# Vérification : python -m pip check
+# To freeze: pip freeze > requirements-frozen.txt
+# To verify: python -m pip check
 numpy>=1.26,<3
 pandas>=2.2,<4
 matplotlib>=3.8

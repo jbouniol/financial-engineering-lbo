@@ -1,20 +1,20 @@
 # Bond ETF Rotation via Yield Curve Regimes
 
-Projet du module *Financial Engineering & Intro to Trading*.
+Group project for the *Financial Engineering & Intro to Trading* course.
 
-Groupe : Jonathan Bouniol, Guillaume RABEAU, Sacha NARDOUX, Florent Negaf, Enzo Natali.
+Team: Jonathan Bouniol, Guillaume RABEAU, Sacha NARDOUX, Florent Negaf, Enzo Natali.
 
-## Ce que fait la stratégie
+## What the strategy does
 
-Chaque mois, on place 100% du capital sur un seul ETF obligataire américain parmi trois : TLT (obligations longues, 20+ ans), IEF (intermédiaires, 7 à 10 ans), SHY (courtes, 1 à 3 ans). Le choix dépend de la forme de la courbe des taux US, mesurée par le spread entre le taux 10 ans et le taux 2 ans (DGS10 moins DGS2).
+Each month we place 100% of capital in a single US Treasury ETF among three: TLT (long bonds, 20+ years), IEF (intermediate, 7-10 years), SHY (short, 1-3 years). The choice depends on the shape of the US yield curve, measured by the spread between the 10-year and 2-year Treasury rates (DGS10 minus DGS2).
 
-Quand le spread est largement positif (> 1%), la courbe est normale et pentue : on prend TLT pour capter le carry sur la duration longue. Quand le spread se resserre (entre 0 et 1%), on passe sur IEF, moins exposé. Quand la courbe s'inverse (spread négatif), historiquement un signal de récession qui arrive, on se réfugie sur SHY pour éviter de tenir de la duration pendant que la Fed monte les taux.
+When the spread is widely positive (> 1%), the curve is normal and steep: we hold TLT to capture the carry on long duration. When the spread tightens (between 0 and 1%), we move to IEF, less exposed. When the curve inverts (negative spread) — historically a leading recession signal — we move to SHY to avoid holding duration while the Fed hikes short rates.
 
-Une deuxième couche regarde la performance des 3 derniers mois de l'ETF choisi par la règle. Si elle est négative, on bascule sur SHY le temps que le prix se stabilise. C'est ce qui rattrape la stratégie sur 2022, où la courbe restait positive pendant que TLT s'effondrait.
+A second layer looks at the 3-month performance of the ETF picked by the rule. If it's negative, we rotate to SHY until the price stabilizes. This is what rescues the strategy in 2022, where the curve stayed positive while TLT was collapsing.
 
-## Comment faire tourner le projet
+## How to run the project
 
-Python 3.12 recommandé.
+Python 3.12 recommended.
 
 ```bash
 python3.12 -m venv .venv
@@ -23,97 +23,97 @@ pip install -r requirements.txt
 python -m pip check
 ```
 
-Puis sélectionner le venv comme kernel dans Jupyter ou VSCode, et ouvrir un notebook.
+Then select the venv as the Jupyter / VSCode kernel and open a notebook.
 
-Au premier lancement, les notebooks téléchargent les prix ETFs depuis Yahoo Finance et les taux depuis FRED, puis cachent tout dans `data/raw/`. Les exécutions suivantes lisent le cache, donc ça tourne hors ligne.
+On the first run the notebooks download the ETF prices from Yahoo Finance and the yields from FRED, then cache everything under `data/raw/`. Subsequent runs read the cache, so it works offline.
 
-## Organisation du repo
+## Repository layout
 
 ```
 README.md
 requirements.txt
 src/
-  data.py          fetch yfinance + FRED, cache parquet
-  backtest.py      signaux V1/V4, engine, métriques rf-aware
-  robustness.py    sensibilité, bootstrap, PSR, Newey-West,
+  data.py          fetch yfinance + FRED, parquet cache
+  backtest.py      V1/V4 signals, engine, rf-aware metrics
+  robustness.py    sensitivity, bootstrap, PSR, Newey-West,
                    Jobson-Korkie, ADF, walk-forward, CAPM
-data/raw/          cache des données (parquet)
+data/raw/          parquet data cache
 notebooks/
-  01_EDA.ipynb                      exploration des données, test ADF sur spread
-  02_backtest_and_strategy.ipynb    stratégie + itérations V1 à V4, robustesse, walk-forward
+  01_EDA.ipynb                      data exploration, ADF test on the spread
+  02_backtest_and_strategy.ipynb    strategy + V1-V4 iterations, robustness, walk-forward
   03_paper_trading_analysis.ipynb   paper trading 2024-2026 vs BH IEF
-  FINAL_notebook.ipynb              version livrée, 12 sections
+  FINAL_notebook.ipynb              delivered notebook, 12 sections
 ```
 
-L'ordre logique de lecture : 01, puis 02, puis 03, puis FINAL. Le code partagé est dans `src/` ; les notebooks l'importent.
+Logical reading order: 01, then 02, then 03, then FINAL. Shared code lives in `src/`; the notebooks import from it.
 
-## Données utilisées
+## Data sources
 
-| Source | Série | Description |
+| Source | Series | Description |
 |---|---|---|
-| Yahoo Finance | TLT, IEF, SHY | Univers principal (Treasury ETFs iShares) |
-| Yahoo Finance | AGG, SPY | Benchmarks élargis (Aggregate Bond + S&P 500) |
-| FRED | DGS2, DGS10 | Taux US 2 ans et 10 ans constant maturity, base du signal |
-| FRED | DGS3MO | T-Bill 3 mois, proxy du taux sans risque pour Sharpe ajusté |
+| Yahoo Finance | TLT, IEF, SHY | Main universe (iShares Treasury ETFs) |
+| Yahoo Finance | AGG, SPY | Wider benchmarks (Aggregate Bond + S&P 500) |
+| FRED | DGS2, DGS10 | US 2Y and 10Y constant maturity yields, signal base |
+| FRED | DGS3MO | 3-month T-Bill, risk-free proxy for the adjusted Sharpe |
 
-Période : 2003-01 à aujourd'hui. Fréquence daily. Prix yfinance ajustés splits et dividendes. FRED via leur endpoint CSV public, pas besoin de clé API.
+Coverage: 2003-01 to today. Daily frequency. Yahoo Finance prices adjusted for splits and dividends. FRED via its public CSV endpoint — no API key required.
 
-## Paramètres du backtest
+## Backtest parameters
 
-| Élément | Valeur |
+| Item | Value |
 |---|---|
-| Univers | TLT, IEF, SHY |
-| Long-only | Oui, somme des poids = 1 |
-| Rebalancing | Mensuel, dernier jour de **trading** du mois (calendrier ETF, pas calendaire) |
-| Lag d'exécution | 1 jour de trading (jour de trading réel, pas BusinessDay civil) |
-| Lag publication FRED | yields shiftés de 1 jour avant construction du signal |
-| Transaction cost | 2 bps par côté |
-| Slippage backtest | 2 bps |
-| Slippage paper | 5 bps |
+| Universe | TLT, IEF, SHY |
+| Long-only | Yes, weights sum to 1 |
+| Rebalancing | Monthly, last **trading** day of the month (ETF calendar, not civil) |
+| Execution lag | 1 trading day (real trading day, not civil BusinessDay) |
+| FRED publication lag | yields shifted by 1 day before signal construction |
+| Transaction cost | 2 bps per side |
+| Backtest slippage | 2 bps |
+| Paper slippage | 5 bps |
 
-## Méthodologie et tests
+## Methodology and tests
 
-Le projet intègre les contrôles méthodologiques standards d'un backtest sérieux :
+The project includes the standard methodological controls expected from a serious backtest:
 
-| Contrôle | Implémentation |
+| Control | Implementation |
 |---|---|
-| Look-ahead bias | Shift FRED + calendrier ETF + lag jours de trading réels |
-| Stationnarité du signal | Test ADF sur spread 2s10s (non stationnaire, exploité en régimes) |
-| Sensibilité paramètres | Heatmap 1D (seuils V1) et 2D (threshold_high × lookback V4) |
-| Walk-forward | Refit `(low, high, lookback)` tous les 3 ans sur fenêtre train 5 ans glissante |
-| Significance Sharpe | Block bootstrap + PSR + Newey-West + Jobson-Korkie |
-| Benchmarks multiples | BH IEF, BH AGG, 60/40 SPY/IEF, alpha CAPM sur (AGG, SPY) |
-| Sharpe rf | Calculé avec rf=0 et avec rf=DGS3MO |
+| Look-ahead bias | FRED shift + ETF calendar + lag in real trading days |
+| Signal stationarity | ADF test on the 2s10s spread (non-stationary, exploited as regimes) |
+| Parameter sensitivity | 1D heatmap (V1 thresholds) and 2D heatmap (threshold_high × lookback V4) |
+| Walk-forward | Refit `(low, high, lookback)` every 3 years on a rolling 5-year train window |
+| Sharpe significance | Block bootstrap + PSR + Newey-West + Jobson-Korkie |
+| Multiple benchmarks | BH IEF, BH AGG, 60/40 SPY/IEF, CAPM alpha on (AGG, SPY) |
+| Sharpe rf | Computed with rf=0 and with rf=DGS3MO |
 
-## Résultats
+## Results
 
-Backtest 2003 à 2026 avec frais inclus :
+Backtest 2003 to 2026, costs included:
 
-| Version | CAGR | Vol | Sharpe | Calmar | Max DD | Turnover/an |
+| Version | CAGR | Vol | Sharpe | Calmar | Max DD | Turnover/year |
 |---|---:|---:|---:|---:|---:|---:|
-| V1 sans coûts | 5.07% | 11.0% | 0.50 | 0.19 | -26.6% | 0.92 |
+| V1 no costs | 5.07% | 11.0% | 0.50 | 0.19 | -26.6% | 0.92 |
 | V2 + transaction costs | 5.05% | 11.0% | 0.50 | 0.19 | -26.6% | 0.92 |
 | V3 + slippage | 5.03% | 11.0% | 0.50 | 0.19 | -26.6% | 0.92 |
-| V4 + filtre trend | 4.08% | 8.9% | 0.50 | 0.19 | -21.2% | 3.07 |
+| V4 + trend filter | 4.08% | 8.9% | 0.50 | 0.19 | -21.2% | 3.07 |
 | Buy & Hold IEF | 3.38% | 6.8% | 0.52 | 0.14 | -23.9% | — |
 | Buy & Hold AGG | 3.06% | 5.2% | 0.61 | 0.17 | -18.4% | — |
 | 60/40 SPY/IEF | 8.72% | 10.7% | 0.83 | 0.28 | -31.4% | — |
 
-Paper trading 2024-2026 avec V4 et exécution plus réaliste (lag T+2, slippage 5 bps) :
+Paper trading 2024-2026 with V4 and hardened execution (T+2 lag, 5 bps slippage):
 
-| Période | CAGR | Vol | Sharpe | Max DD |
+| Window | CAGR | Vol | Sharpe | Max DD |
 |---|---:|---:|---:|---:|
 | In-sample 2003-2023 | 4.39% | 9.3% | 0.51 | -21.2% |
 | OOS backtest 2024-2026 | 1.30% | 3.9% | 0.35 | -3.95% |
 | OOS paper 2024-2026 | 1.09% | 3.9% | 0.30 | -4.68% |
 | BH IEF OOS 2024-2026 | 2.32% | 6.0% | 0.41 | -6.89% |
 
-Tests de significance V4 vs BH IEF (full history) :
+Significance tests V4 vs BH IEF (full history):
 
-| Test | Résultat |
+| Test | Result |
 |---|---|
-| Jobson-Korkie (différence de Sharpe) | z = −0.13, p = 0.90 |
-| Newey-West (alpha vs IEF) | α = +0.87%/an, t = 0.66, p = 0.51 |
+| Jobson-Korkie (Sharpe difference) | z = −0.13, p = 0.90 |
+| Newey-West (alpha vs IEF) | α = +0.87%/year, t = 0.66, p = 0.51 |
 | Probabilistic Sharpe Ratio vs IEF | 45% |
-| CAPM regression sur (AGG, SPY), rf=DGS3MO | α = +3.51%/an, t = 2.31, **p = 0.021** |
-| Walk-forward (refit / 3 ans) vs paramètres a priori | Sharpe 0.48 vs 0.47 |
+| CAPM regression on (AGG, SPY), rf=DGS3MO | α = +3.51%/year, t = 2.31, **p = 0.021** |
+| Walk-forward (refit every 3 years) vs a priori parameters | Sharpe 0.48 vs 0.47 |
