@@ -1,6 +1,6 @@
-# Bond ETF Rotation via Yield Curve Regimes
+# Quantitative Fixed-Income ETF Curve-Rotation Strategy (TLT / IEF / SHY)
 
-Group project for the *Financial Engineering & Intro to Trading* course.
+Group project for the *Financial Engineering & Intro to Trading* course (which explains the historical repository name `financial-engineering-lbo`).
 
 Team: Jonathan Bouniol, Guillaume RABEAU, Sacha NARDOUX, Florent Negaf, Enzo Natali.
 
@@ -34,6 +34,7 @@ On the first run, the notebook automatically fetches ETF prices from Yahoo Finan
 ```
 README.md
 requirements.txt
+LICENSE
 Docs/
   group_project_guidelines.md   full grading rubric and project brief
 data/raw/                       parquet data cache (auto-generated on first run)
