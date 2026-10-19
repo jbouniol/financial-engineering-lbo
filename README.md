@@ -1,6 +1,6 @@
-# Quantitative Fixed-Income ETF Curve-Rotation Strategy (TLT / IEF / SHY)
+# treasury-etf-curve-rotation
 
-Group project for the *Financial Engineering & Intro to Trading* course (which explains the historical repository name `financial-engineering-lbo`).
+Group project for the *Financial Engineering & Intro to Trading* course (formerly `financial-engineering-lbo`).
 
 Team: Jonathan Bouniol, Guillaume RABEAU, Sacha NARDOUX, Florent Negaf, Enzo Natali.
 
@@ -37,6 +37,10 @@ requirements.txt
 LICENSE
 Docs/
   group_project_guidelines.md   full grading rubric and project brief
+src/
+  __init__.py
+  backtest.py                   execution logic and lag adjustment
+  metrics.py                    performance and statistical metrics
 data/raw/                       parquet data cache (auto-generated on first run)
   etf_prices.parquet
   benchmark_prices.parquet
@@ -90,21 +94,21 @@ Backtest 2003 to 2026, costs included:
 
 | Version | CAGR | Vol | Sharpe | Calmar | Max DD | Turnover/year |
 |---|---:|---:|---:|---:|---:|---:|
-| V1 no costs | 5.07% | 11.0% | 0.50 | 0.19 | -26.6% | 0.92 |
-| V2 + transaction costs | 5.05% | 11.0% | 0.50 | 0.19 | -26.6% | 0.92 |
-| V3 + slippage | 5.03% | 11.0% | 0.50 | 0.19 | -26.6% | 0.92 |
-| V4 + trend filter | 4.08% | 8.9% | 0.50 | 0.19 | -21.2% | 3.07 |
-| Buy & Hold IEF | 3.38% | 6.8% | 0.52 | 0.14 | -23.9% | — |
-| Buy & Hold AGG | 3.06% | 5.2% | 0.61 | 0.17 | -18.4% | — |
-| 60/40 SPY/IEF | 8.72% | 10.7% | 0.83 | 0.28 | -31.4% | — |
+| V1 no costs | 5.01% | 11.0% | 0.34 | 0.19 | -26.6% | 0.92 |
+| V2 + transaction costs | 4.99% | 11.0% | 0.34 | 0.19 | -26.6% | 0.92 |
+| V3 + slippage | 4.97% | 11.0% | 0.34 | 0.19 | -26.6% | 0.92 |
+| V4 + trend filter | 3.70% | 8.9% | 0.26 | 0.17 | -22.2% | 3.07 |
+| Buy & Hold IEF | 3.37% | 6.8% | 0.27 | 0.14 | -23.9% | — |
+| Buy & Hold AGG | 3.06% | 5.2% | 0.27 | 0.17 | -18.4% | — |
+| 60/40 SPY/IEF | 8.72% | 10.7% | 0.67 | 0.28 | -31.4% | — |
 
 Paper trading 2024-2026 with V4 and hardened execution (T+2 lag, 5 bps slippage):
 
 | Window | CAGR | Vol | Sharpe | Max DD |
 |---|---:|---:|---:|---:|
-| In-sample 2003-2023 | 4.39% | 9.3% | 0.51 | -21.2% |
-| OOS backtest 2024-2026 | 1.30% | 3.9% | 0.35 | -3.95% |
-| OOS paper 2024-2026 | 1.09% | 3.9% | 0.30 | -4.68% |
+| In-sample 2003-2023 | 3.96% | 9.3% | 0.31 | -22.2% |
+| OOS backtest 2024-2026 | 1.46% | 3.9% | -0.78 | -4.62% |
+| OOS paper 2024-2026 | 1.89% | 3.9% | -0.67 | -4.22% |
 | BH IEF OOS 2024-2026 | 2.32% | 6.0% | 0.41 | -6.89% |
 
 Significance tests V4 vs BH IEF (full history):
@@ -114,5 +118,5 @@ Significance tests V4 vs BH IEF (full history):
 | Jobson-Korkie (Sharpe difference) | z = −0.13, p = 0.90 |
 | Newey-West (alpha vs IEF) | α = +0.87%/year, t = 0.66, p = 0.51 |
 | Probabilistic Sharpe Ratio vs IEF | 45% |
-| CAPM regression on (AGG, SPY), rf=DGS3MO | α = +3.51%/year, t = 2.31, **p = 0.021** |
-| Walk-forward (refit every 3 years) vs a priori parameters | Sharpe 0.48 vs 0.47 |
+| CAPM regression on (AGG, SPY), rf=DGS3MO | α = +3.14%/year, t = 2.05, **p = 0.041** |
+| Walk-forward (refit every 3 years) vs a priori parameters | Sharpe 0.31 vs 0.28 |
